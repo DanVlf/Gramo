@@ -44,6 +44,7 @@ class ImportScreen(
     private enum class EditorKind {
         URL,
         COOKIE,
+        SYNC_URL,
     }
 
     @Composable
@@ -56,6 +57,7 @@ class ImportScreen(
 
         val urlFieldState = rememberTextFieldState("")
         val cookieFieldState = rememberTextFieldState("")
+        val syncFieldState = rememberTextFieldState("")
         val keyboardOptionsFlow = rememberKeyboardOptions()
 
         fun submitDownload() {
@@ -63,6 +65,14 @@ class ImportScreen(
                 urlFieldState.text.toString(),
                 cookieFieldState.text.toString(),
             )
+        }
+
+        LaunchedEffect(state.syncUrl) {
+            if (state.syncUrl != null && syncFieldState.text.isBlank()) {
+                syncFieldState.edit {
+                    replace(0, length, state.syncUrl.orEmpty())
+                }
+            }
         }
 
         LaunchedEffect(Unit) {
@@ -95,6 +105,55 @@ class ImportScreen(
                             .fillMaxWidth()
                             .padding(horizontal = 1f.gridUnitsAsDp()),
                     ) {
+                        SectionLabel("SYNC")
+                        LightTextField(
+                            label = "SYNC URL",
+                            value = syncFieldState.text.toString(),
+                            placeholder = "http://192.168.1.42:8765/gramo.json",
+                            onClick = {
+                                editorSession++
+                                openEditor = EditorKind.SYNC_URL
+                            },
+                            modifier = Modifier.padding(bottom = 1f.gridUnitsAsDp()),
+                        )
+                        LightText(
+                            text = "SAVE AND SYNC",
+                            variant = LightTextVariant.Button,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .lightClickable {
+                                    gramoViewModel.saveSyncUrl(syncFieldState.text.toString())
+                                }
+                                .padding(bottom = 1f.gridUnitsAsDp()),
+                        )
+                        if (state.syncUrl != null) {
+                            LightText(
+                                text = "SYNC NOW",
+                                variant = LightTextVariant.Button,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .lightClickable { gramoViewModel.syncNow() }
+                                    .padding(bottom = 1f.gridUnitsAsDp()),
+                            )
+                        }
+                        state.importStatus?.let { status ->
+                            LightText(
+                                text = status.describe(),
+                                variant = LightTextVariant.Detail,
+                                lighten = true,
+                                modifier = Modifier.padding(bottom = 1.5f.gridUnitsAsDp()),
+                            )
+                        }
+                        LightText(
+                            text = "On your computer, run scripts/serve_music.py in your " +
+                                "music folder (see README). Gramo remembers this URL and " +
+                                "syncs new tracks every time it opens. Local-network http " +
+                                "links are allowed.",
+                            variant = LightTextVariant.Superfine,
+                            lighten = true,
+                            modifier = Modifier.padding(bottom = 2f.gridUnitsAsDp()),
+                        )
+
                         SectionLabel("FROM THE WEB (HTTPS)")
                         LightTextField(
                             label = "ARCHIVE URL",
@@ -201,6 +260,19 @@ class ImportScreen(
                         )
                     }
 
+                    EditorKind.SYNC_URL -> {
+                        LightTextInputEditor(
+                            title = "Sync URL",
+                            state = syncFieldState,
+                            onSubmit = { openEditor = null },
+                            onBack = { openEditor = null },
+                            keyboardOptionsFlow = keyboardOptionsFlow,
+                            singleLine = true,
+                            editorKey = editorSession,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+
                     null -> Unit
                 }
             }
@@ -217,7 +289,11 @@ private fun ImportStatus.describe(): String = when (this) {
     is ImportStatus.Importing -> "Importing $archiveName... $imported tracks"
 
     is ImportStatus.Done ->
-        "Import finished: $imported new tracks, $totalTracks in library."
+        if (imported == 0) {
+            "Library already up to date. $totalTracks tracks."
+        } else {
+            "Sync finished: $imported new tracks, $totalTracks in library."
+        }
 }
 
 @Composable

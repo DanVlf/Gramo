@@ -1,5 +1,9 @@
 package dev.gramo
 
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.lifecycle.viewModelScope
 import com.thelightphone.sdk.LightViewModel
 import com.thelightphone.sdk.SimpleLightScreen
@@ -16,6 +20,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -41,6 +46,7 @@ sealed class ImportStatus {
 data class GramoUiState(
     val tracks: List<Track> = emptyList(),
     val currentIndex: Int = -1,
+    val syncUrl: String? = null,
     val importStatus: ImportStatus? = null,
     val error: String? = null,
 ) {
@@ -51,6 +57,7 @@ data class GramoUiState(
 class GramoViewModel(
     audio: LightAudio,
     filesDir: File,
+    private val dataStore: DataStore<Preferences>,
 ) : LightViewModel<Unit>() {
 
     private val musicDir = File(filesDir, MUSIC_DIR_NAME)
@@ -77,6 +84,15 @@ class GramoViewModel(
 
     init {
         refresh()
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                val saved = dataStore.data.first()[SYNC_URL_KEY]
+                _uiState.update { it.copy(syncUrl = saved) }
+                if (!saved.isNullOrBlank()) {
+                    syncNow()
+                }
+            }
+        }
     }
 
     override fun onScreenShow(screen: SimpleLightScreen<Unit>) {
@@ -185,6 +201,70 @@ class GramoViewModel(
         }
     }
 
+    fun saveSyncUrl(url: String) {
+        val trimmed = url.trim()
+        if (trimmed.isEmpty()) {
+            _uiState.update { it.copy(error = "Enter a sync URL (http://computer-ip:8765/gramo.json).") }
+            return
+        }
+        if (!trimmed.startsWith("https://", ignoreCase = true) &&
+            !trimmed.startsWith("http://", ignoreCase = true)
+        ) {
+            _uiState.update { it.copy(error = "Enter a valid http(s) URL.") }
+            return
+        }
+        _uiState.update { it.copy(syncUrl = trimmed) }
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                dataStore.edit { prefs -> prefs[SYNC_URL_KEY] = trimmed }
+            }
+        }
+        syncNow()
+    }
+
+    fun syncNow() {
+        val url = _uiState.value.syncUrl?.trim().orEmpty()
+        if (url.isEmpty()) {
+            _uiState.update { it.copy(error = "Set a sync URL first.") }
+            return
+        }
+        startImport {
+            val manifest = importer.fetchManifest(url).getOrThrow()
+            val existing = musicDir.listFiles()?.map { it.name }?.toSet() ?: emptySet()
+            val plan = SyncPlanner.plan(manifest, existing)
+            if (plan.isEmpty()) {
+                return@startImport ImportResult(imported = 0, skipped = 0)
+            }
+            val base = url.trimEnd('/').substringBeforeLast('/') + "/"
+            var imported = 0
+            for (file in plan) {
+                _uiState.update {
+                    it.copy(
+                        importStatus = ImportStatus.Downloading(
+                            label = file.name,
+                            bytes = 0L,
+                            totalBytes = if (file.size > 0) file.size else null,
+                        ),
+                    )
+                }
+                val encoded = java.net.URLEncoder
+                    .encode(file.name, "UTF-8")
+                    .replace("+", "%20")
+                importer.downloadTo(base + encoded, musicDir, file.name) { bytes, total ->
+                    _uiState.update { state ->
+                        (state.importStatus as? ImportStatus.Downloading)?.let { status ->
+                            state.copy(
+                                importStatus = status.copy(bytes = bytes, totalBytes = total),
+                            )
+                        } ?: state
+                    }
+                }
+                imported++
+            }
+            ImportResult(imported = imported, skipped = 0)
+        }
+    }
+
     fun dismissError() {
         _uiState.update { it.copy(error = null) }
     }
@@ -239,5 +319,6 @@ class GramoViewModel(
     private companion object {
         const val MUSIC_DIR_NAME = "music"
         const val DOWNLOADS_DIR_NAME = "downloads"
+        val SYNC_URL_KEY = stringPreferencesKey("sync_url")
     }
 }

@@ -43,7 +43,11 @@ class LibraryScreen(private val sealedActivity: SealedLightActivity) :
         get() = GramoViewModel::class.java
 
     override fun createViewModel(): GramoViewModel =
-        GramoViewModel(DefaultLightAudio(sealedActivity), lightContext.filesDir)
+        GramoViewModel(
+            DefaultLightAudio(sealedActivity),
+            lightContext.filesDir,
+            lightContext.dataStore,
+        )
 
     @Composable
     override fun Content() {

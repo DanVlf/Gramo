@@ -11,6 +11,7 @@ import okhttp3.Request
 class ArchiveImporter {
 
     private val client = OkHttpClient()
+    private val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
 
     fun close() {
         client.dispatcher.executorService.shutdown()
@@ -56,6 +57,20 @@ class ArchiveImporter {
         destination
     }
 
+    fun fetchManifest(url: String): Result<SyncManifest> = runCatching {
+        val request = Request.Builder()
+            .url(url)
+            .header("User-Agent", USER_AGENT)
+            .build()
+        client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw IllegalStateException("Manifest failed with HTTP ${response.code}")
+            }
+            val body = response.body?.string() ?: throw IllegalStateException("Empty manifest")
+            json.decodeFromString(SyncManifest.serializer(), body)
+        }
+    }
+
     fun importZip(
         archive: File,
         musicDir: File,
@@ -90,10 +105,11 @@ class ArchiveImporter {
     }
 
     private fun uniqueDestination(dir: File, name: String): File {
-        var candidate = File(dir, name)
+        var candidate = File(dir, sanitizeFileName(name))
         if (!candidate.exists()) return candidate
-        val base = name.substringBeforeLast('.', name)
-        val extension = name.substringAfterLast('.', "")
+        val sanitized = sanitizeFileName(name)
+        val base = sanitized.substringBeforeLast('.', sanitized)
+        val extension = sanitized.substringAfterLast('.', "")
         var counter = 1
         while (true) {
             candidate = if (extension.isEmpty()) {
@@ -104,6 +120,17 @@ class ArchiveImporter {
             if (!candidate.exists()) return candidate
             counter++
         }
+    }
+
+    fun downloadTo(
+        url: String,
+        dir: File,
+        name: String,
+        onProgress: (bytes: Long, totalBytes: Long?) -> Unit = { _, _ -> },
+    ): File {
+        val target = uniqueDestination(dir, name)
+        download(url, target, null, onProgress)
+        return target
     }
 
     private fun sanitizeFileName(name: String): String =

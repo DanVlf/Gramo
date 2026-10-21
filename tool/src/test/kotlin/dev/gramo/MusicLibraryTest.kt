@@ -9,6 +9,44 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
+class SyncManifestTest {
+
+    private val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+
+    @Test
+    fun `parses a serve_music manifest`() {
+        val manifest = json.decodeFromString(
+            SyncManifest.serializer(),
+            """{"files":[{"name":"song a.mp3","size":123},{"name":"song_b.m4a","size":456}]}""",
+        )
+        assertEquals(2, manifest.files.size)
+        assertEquals("song a.mp3", manifest.files[0].name)
+        assertEquals(456L, manifest.files[1].size)
+    }
+
+    @Test
+    fun `empty and unknown fields are tolerated`() {
+        val manifest = json.decodeFromString(
+            SyncManifest.serializer(),
+            """{"files":[],"extra":"ignored"}""",
+        )
+        assertEquals(0, manifest.files.size)
+    }
+
+    @Test
+    fun `planner downloads only missing files`() {
+        val manifest = SyncManifest(
+            files = listOf(
+                SyncFile("have.mp3", 1),
+                SyncFile("new.mp3", 2),
+                SyncFile("gone.mp3", 3),
+            ),
+        )
+        val plan = SyncPlanner.plan(manifest, existingNames = setOf("have.mp3"))
+        assertEquals(listOf("new.mp3", "gone.mp3"), plan.map { it.name })
+    }
+}
+
 class MusicLibraryTest {
 
     @Test

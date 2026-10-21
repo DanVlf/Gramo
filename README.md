@@ -5,6 +5,35 @@ A minimal monochrome music player for the Light Phone III, built as a native
 music library — starting with the songs you uploaded to YouTube Music, exported
 via Google Takeout — with no Google apps, accounts or services on the phone.
 
+## Install
+
+Prebuilt APKs land on the [releases page](../../releases) whenever a `v*` tag
+is pushed (GitHub Actions builds `tool-release.apk` and attaches it as
+`Gramo-vX.Y.Z.apk`). Obtainium can track this repo directly: add source
+`https://github.com/DanVlf/Gramo` — the latest release APK installs like any
+update over previous versions.
+
+Version numbers come from `tool/lighttool.toml`: bump `versionCode` (and
+`versionName`) before tagging, since Android refuses downgrades.
+
+## Sync
+
+Keep a music folder on your computer in step with the phone:
+
+1. On the computer, run the bundled server in your music folder:
+
+   ```sh
+   python3 scripts/serve_music.py ~/Music 8765
+   ```
+
+2. In Gramo: IMPORT → SYNC URL, enter
+   `http://<computer-ip>:8765/gramo.json` → SAVE AND SYNC.
+
+Gramo remembers the URL, and every time it opens it downloads any tracks
+that are new on the computer (comparing by file name). SYNC NOW forces a
+check. Local-network plain-http URLs are allowed for this; an https URL
+works too. Sync only ever adds tracks — it never deletes from the phone.
+
 ## Importing Music
 
 **From Google Takeout (HTTPS download)**
